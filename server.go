@@ -299,6 +299,9 @@ type Server struct {
 	// This option is useful for servers that desire to treat
 	// multipart form data as a binary blob, or choose when to parse the data.
 	//
+	// Keep in mind in that case all unparsed multipart form data (including files)
+	// will be stored in memory.
+	//
 	// Server pre parses multipart form data by default.
 	DisablePreParseMultipartForm bool
 

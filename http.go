@@ -789,7 +789,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 		return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
 	}
 
-	f, err := readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, len(body), len(body))
+	f, err := readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, len(body), len(body), len(body))
 	if err != nil {
 		return nil, err
 	}
@@ -855,10 +855,15 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	return nil
 }
 
-func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize int) (*multipart.Form, error) {
+func readMultipartForm(r io.Reader, boundary string, size, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
 	// Do not care about memory allocations here, since they are tiny
 	// compared to multipart data (aka multi-MB files) usually sent
 	// in multipart/form-data requests.
+
+	// Set limit in io.LimitReader to maxBodySize if size == -1 (chunked transfer-encoding)
+	if size == -1 {
+		size = maxBodySize
+	}
 
 	if size <= 0 {
 		return nil, fmt.Errorf("form size must be greater than 0. Given %d", size)
@@ -1012,20 +1017,6 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		if maxBodySize > 0 && contentLength > maxBodySize {
 			return ErrBodyTooLarge
 		}
-
-		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
-			}
-		}
 	}
 
 	if contentLength == -2 {
@@ -1035,6 +1026,20 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		// 'Content-Length' and 'Transfer-Encoding' headers.
 		req.Header.SetContentLength(0)
 		return nil
+	}
+
+	if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+		// Pre-read multipart form data of known length.
+		// This way we limit memory usage for large file uploads, since their contents
+		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, maxBodySize, defaultMaxInMemoryFileSize)
+			if err != nil {
+				req.Reset()
+			}
+			return err
+		}
 	}
 
 	bodyBuf := req.bodyBuffer()

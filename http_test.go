@@ -7,6 +7,8 @@ import (
 	"io"
 	"io/ioutil"
 	"mime/multipart"
+	"net/http"
+	"net/http/httputil"
 	"reflect"
 	"strings"
 	"testing"
@@ -883,6 +885,56 @@ func TestRequestContinueReadBody(t *testing.T) {
 	}
 	if string(tail) != "f4343" {
 		t.Fatalf("unexpected tail %q. Expecting %q", tail, "f4343")
+	}
+}
+
+func TestRequestContinueReadBodyPrereadMultipartFormChunked(t *testing.T) {
+	t.Parallel()
+
+	reader, writer := io.Pipe()
+	req, err := http.NewRequest("PUT", "http://www.example.org", reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	form := multipart.NewWriter(writer)
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer writer.Close()
+		defer form.Close()
+		defer close(errCh)
+
+		for i := 0; i < 10; i++ {
+			k := fmt.Sprintf("key_%d", i)
+			v := fmt.Sprintf("value_%d", i)
+			if err := form.WriteField(k, v); err != nil {
+				errCh <- err
+			}
+		}
+
+	}()
+	req.Header.Set("Content-Type", form.FormDataContentType())
+
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err := <-errCh; err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br := bufio.NewReader(bytes.NewBuffer(dump))
+
+	var r Request
+	if err := r.Header.Read(br); err != nil {
+		t.Fatalf("unexpected error reading headers: %s", err)
+	}
+
+	if err := r.readLimitBody(br, 10000, false, true); err != nil {
+		t.Fatalf("unexpected error reading body: %s", err)
+	}
+
+	if r.multipartForm == nil {
+		t.Fatalf("The multipartForm of the Request must not be nil")
 	}
 }
 
