@@ -275,6 +275,16 @@ type Server struct {
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	MaxRequestBodySize int
 
+	// Maximum Multipart Form size from request body.
+	//
+	// The server rejects request if multipart form data exceeding this limit.
+	// It's useful when working with large files from multipart form data.
+	//
+	// The limit will not work if DisablePreParseMultipartForm is set to true.
+	//
+	// Multipart Form size is limited by DefaultMaxRequestBodySize by default.
+	MaxMultipartFormSize int
+
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
 	//
@@ -300,7 +310,7 @@ type Server struct {
 	// multipart form data as a binary blob, or choose when to parse the data.
 	//
 	// Keep in mind in that case all unparsed multipart form data (including files)
-	// will be stored in memory.
+	// will be stored in memory and should not exceed MaxRequestBodySize.
 	//
 	// Server pre parses multipart form data by default.
 	DisablePreParseMultipartForm bool
@@ -465,6 +475,9 @@ type RequestConfig struct {
 	// Maximum request body size.
 	// a zero value means that default values will be honored
 	MaxRequestBodySize int
+	// Maximum multipart form data size.
+	// a zero value means that default values will be honored
+	MaxMultipartFormSize int
 }
 
 // CompressHandler returns RequestHandler that transparently compresses
@@ -1982,6 +1995,10 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 	if maxRequestBodySize <= 0 {
 		maxRequestBodySize = DefaultMaxRequestBodySize
 	}
+	maxMultipartFormSize := s.MaxMultipartFormSize
+	if maxMultipartFormSize <= 0 {
+		maxMultipartFormSize = DefaultMaxRequestBodySize
+	}
 	writeTimeout := s.WriteTimeout
 
 	ctx := s.acquireCtx(c)
@@ -2064,12 +2081,15 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					if reqConf.MaxRequestBodySize > 0 {
 						maxRequestBodySize = reqConf.MaxRequestBodySize
 					}
+					if reqConf.MaxMultipartFormSize > 0 {
+						maxMultipartFormSize = reqConf.MaxMultipartFormSize
+					}
 					if reqConf.WriteTimeout > 0 {
 						writeTimeout = reqConf.WriteTimeout
 					}
 				}
 				//read body
-				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+				err = ctx.Request.readLimitBody(br, maxRequestBodySize, maxMultipartFormSize, s.GetOnly, !s.DisablePreParseMultipartForm)
 			}
 
 			if err == nil {
@@ -2144,7 +2164,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					br = acquireReader(ctx)
 				}
 
-				err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
+				err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, maxMultipartFormSize, !s.DisablePreParseMultipartForm)
 				if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 					releaseReader(s, br)
 					br = nil

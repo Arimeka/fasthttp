@@ -871,7 +871,7 @@ func TestRequestContinueReadBody(t *testing.T) {
 		t.Fatalf("MayContinue must return true")
 	}
 
-	if err := r.ContinueReadBody(br, 0, true); err != nil {
+	if err := r.ContinueReadBody(br, 0, 0, true); err != nil {
 		t.Fatalf("error when reading request body: %s", err)
 	}
 	body := r.Body()
@@ -929,7 +929,7 @@ func TestRequestContinueReadBodyPrereadMultipartFormChunked(t *testing.T) {
 		t.Fatalf("unexpected error reading headers: %s", err)
 	}
 
-	if err := r.readLimitBody(br, 10000, false, true); err != nil {
+	if err := r.readLimitBody(br, 10000, 10000, false, true); err != nil {
 		t.Fatalf("unexpected error reading body: %s", err)
 	}
 
@@ -966,7 +966,7 @@ func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
 		t.Fatalf("unexpected error reading headers: %s", err)
 	}
 
-	if err := r.readLimitBody(br, 10000, false, false); err != nil {
+	if err := r.readLimitBody(br, 10000, 10000, false, false); err != nil {
 		t.Fatalf("unexpected error reading body: %s", err)
 	}
 

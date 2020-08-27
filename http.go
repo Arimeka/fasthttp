@@ -968,10 +968,10 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
-	return req.readLimitBody(r, maxBodySize, false, true)
+	return req.readLimitBody(r, maxBodySize, maxBodySize, false, true)
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, preParseMultipartForm bool) error {
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize, maxMultipartFormSize int, getOnly bool, preParseMultipartForm bool) error {
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
@@ -986,7 +986,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return nil
 	}
 
-	return req.ContinueReadBody(r, maxBodySize, preParseMultipartForm)
+	return req.ContinueReadBody(r, maxBodySize, maxMultipartFormSize, preParseMultipartForm)
 }
 
 // MayContinue returns true if the request contains
@@ -1010,11 +1010,18 @@ func (req *Request) MayContinue() bool {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
-func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
+//
+// If maxMultipartFormSize > 0 and multipart form data exceeds maxMultipartFormSize,
+// then ErrBodyTooLarge is returned.
+func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize, maxMultipartFormSize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.realContentLength()
 	if contentLength > 0 {
-		if maxBodySize > 0 && contentLength > maxBodySize {
+		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+			if maxMultipartFormSize > 0 && contentLength > maxMultipartFormSize {
+				return ErrBodyTooLarge
+			}
+		} else if maxBodySize > 0 && contentLength > maxBodySize {
 			return ErrBodyTooLarge
 		}
 	}
@@ -1034,7 +1041,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
 		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, maxBodySize, defaultMaxInMemoryFileSize)
+			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, maxMultipartFormSize, defaultMaxInMemoryFileSize)
 			if err != nil {
 				req.Reset()
 			}

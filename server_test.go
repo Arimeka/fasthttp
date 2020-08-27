@@ -10,6 +10,8 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"net"
+	"net/http"
+	"net/http/httputil"
 	"os"
 	"reflect"
 	"strings"
@@ -3344,6 +3346,70 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 	case err := <-ch:
 		if err != ErrBodyTooLarge {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+}
+
+func TestMaxMultipartFormSizePerRequest(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			// do nothing :)
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			return RequestConfig{
+				MaxMultipartFormSize: 5 << 10,
+			}
+		},
+		ReadTimeout:          time.Second * 5,
+		WriteTimeout:         time.Second * 5,
+		MaxMultipartFormSize: 1 << 20,
+		MaxRequestBodySize:   2 << 20,
+	}
+
+	reader, writer := io.Pipe()
+	req, err := http.NewRequest("PUT", "http://www.example.org", reader)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	form := multipart.NewWriter(writer)
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer writer.Close()
+		defer form.Close()
+		defer close(errCh)
+
+		if err := form.WriteField("test", strings.Repeat("a", (5<<10)+1)); err != nil {
+			errCh <- err
+		}
+
+	}()
+	req.Header.Set("Content-Type", form.FormDataContentType())
+
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err := <-errCh; err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	rw := &readWriter{}
+	rw.r.Write(dump)
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err == nil {
+			t.Fatal("Expected error, got nil")
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout")
